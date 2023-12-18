@@ -17,6 +17,7 @@ const {
 	Logger,
 	Signals,
 	Utils: { waitForIt },
+	CacheRedis,
 } = require('lisk-service-framework');
 const { createWSClient, createIPCClient } = require('@liskhq/lisk-api-client');
 
@@ -47,6 +48,13 @@ let isInstantiating = false;
 let isClientAlive = false;
 let isGenesisBlockIndexed = false;
 let wsConnectionsEstablished = 0;
+
+// TODO: Remove this variable and cache usage and docker compose variable. Used to get an idea about the total number of time api client connection is created
+const redisCache = CacheRedis(
+	'temp',
+	process.env.SERVICE_CONNECTOR_CACHE_REDIS || 'redis://lisk:password@127.0.0.1:6381/2',
+);
+const TOTAL_CLIENT_INITIALIZATION_COUNT = 'totalClientInitializationCount';
 
 const pongListener = res => {
 	isClientAlive = true;
@@ -133,6 +141,11 @@ const instantiateClient = async (isForceReInstantiate = false) => {
 				Signals.get('newApiClient').dispatch();
 			}
 
+			await redisCache.set(
+				TOTAL_CLIENT_INITIALIZATION_COUNT,
+				((await redisCache.get(TOTAL_CLIENT_INITIALIZATION_COUNT)) || 0) + 1,
+			);
+
 			isInstantiating = false;
 			return clientCache;
 		}
@@ -196,6 +209,11 @@ if (config.isUseLiskIPCClient) {
 		intervalTimeout = setInterval(async () => {
 			const isAlive = await checkIsClientAlive();
 			if (!isAlive) instantiateClient(true).catch(() => {});
+			logger.info(
+				`Client Liveliness Checks is done. API client instantiated ${await redisCache.get(
+					TOTAL_CLIENT_INITIALIZATION_COUNT,
+				)} time(s) so far.`,
+			);
 		}, intervalMs);
 	};
 
